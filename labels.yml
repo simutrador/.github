@@ -1,0 +1,57 @@
+- name: area:simutrador-client
+color: 4F8CC9
+description: Simutrador Client SDK
+- name: area:simutrador-server
+color: 5BA660
+description: Simutrador Server
+- name: area:simutrador-data-manager
+color: 8E44AD
+description: Data Manager
+- name: area:simutrador-docs
+color: B9770E
+description: Documentation
+- name: type:feature
+color: 1ABC9C
+description: New Capability
+- name: type:bug
+color: E74C3C
+description: Fixes incorrect behavior
+- name: type:chore
+color: 95A5A6
+description: Refactors, deps, tidying
+- name: type:docs
+color: 3498DB
+description: Documentation updates
+- name: size:XS
+color: D6EAF8
+description: < 1h
+- name: size:S
+color: A9CCE3
+description: 1–3h
+- name: size:M
+color: 7FB3D5
+description: 0.5–1d
+- name: size:L
+color: 5499C7
+description: 1–2d
+- name: size:XL
+color: 2E86C1
+description: 3d+
+- name: priority:P0
+color: 000000
+description: Must have / blocking
+- name: priority:P1
+color: 7F8C8D
+description: Should have soon
+- name: priority:P2
+color: BFC9CA
+description: Nice to have
+- name: source:agent
+color: F1C40F
+description: Created/seeded by an agent
+- name: status:needs‑triage
+color: F39C12
+description: Awaiting human triage
+- name: tests-exempt
+color: FAD7A0
+description: Explicit justification required if code changes but no tests
