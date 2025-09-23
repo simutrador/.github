@@ -1,0 +1,26 @@
+name: Bug report
+description: Report a defect
+labels: [type:bug, status:needs‑triage]
+title: "[BUG] <short summary>"
+body:
+- type: textarea
+id: expected
+attributes:
+label: Expected
+validations:
+required: true
+- type: textarea
+id: actual
+attributes:
+label: Actual
+validations:
+required: true
+- type: textarea
+id: repro
+attributes:
+label: Repro steps
+description: Minimal steps + sample data if applicable
+- type: textarea
+id: logs
+attributes:
+label: Logs / screenshots
