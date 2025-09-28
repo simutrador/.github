@@ -1,0 +1,84 @@
+name: Reusable • Build & Deploy MkDocs to Pages
+
+on:
+  workflow_call:
+    inputs:
+      python_version:
+        type: string
+        default: "3.12"
+      publish_dir:
+        type: string
+        default: "site"
+      aggregate_docs:
+        type: string
+        default: ""
+    secrets:
+      GH_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install deps
+        run: uv sync
+
+      - name: Aggregate docs (optional)
+        if: ${{ inputs.aggregate_docs != '' }}
+        env:
+          AGG: ${{ inputs.aggregate_docs }}
+          ORG: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+        run: |
+          IFS=',' read -ra ITEMS <<< "$AGG"
+          for item in "${ITEMS[@]}"; do
+            REPO="${item%%:*}"
+            REST="${item#*:}"
+            SRC="${REST%%:*}"
+            DEST="docs/projects/${REST#*:}"
+            echo "Fetching $REPO/$SRC -> $DEST"
+            mkdir -p "_external/$REPO" "$DEST"
+            gh repo clone "$ORG/$REPO" "_external/$REPO" -- --depth 1
+            if [ -d "_external/$REPO/$SRC" ]; then
+              rsync -a --delete "_external/$REPO/$SRC/" "$DEST/"
+            elif [ -f "_external/$REPO/$SRC" ]; then
+              mkdir -p "$DEST"
+              rsync -a "_external/$REPO/$SRC" "$DEST/"
+            else
+              echo "WARN: '$SRC' not found in $REPO"
+            fi
+          done
+
+      - name: Build MkDocs
+        run: uv run mkdocs build --strict
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ inputs.publish_dir }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
