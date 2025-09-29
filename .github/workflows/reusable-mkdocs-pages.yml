@@ -9,10 +9,12 @@ on:
       publish_dir:
         type: string
         default: "site"
+      # CSV: repo:path_in_repo:dest_subdir (e.g. "simutrador-data-manager:docs:data-manager")
       aggregate_docs:
         type: string
         default: ""
     secrets:
+      # Optional org/user PAT with repo read, only needed if GITHUB_TOKEN can't read source repos
       GH_TOKEN:
         required: false
 
@@ -39,35 +41,59 @@ jobs:
       - name: Install deps
         run: uv sync
 
-      # Optional: aggregate docs from other repos (disabled by default)
-      # - name: Aggregate docs
-      #   if: ${{ inputs.aggregate_docs != '' }}
-      #   env:
-      #     AGG: ${{ inputs.aggregate_docs }}
-      #     ORG: ${{ github.repository_owner }}
-      #     GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
-      #   run: |
-      #     IFS=',' read -ra ITEMS <<< "$AGG"
-      #     for item in "${ITEMS[@]}"; do
-      #       REPO="${item%%:*}"
-      #       REST="${item#*:}"
-      #       SRC="${REST%%:*}"
-      #       DEST="docs/projects/${REST#*:}"
-      #       echo "Fetching $REPO/$SRC -> $DEST"
-      #       mkdir -p "_external/$REPO" "$DEST"
-      #       gh repo clone "$ORG/$REPO" "_external/$REPO" -- --depth 1
-      #       if [ -d "_external/$REPO/$SRC" ]; then
-      #         rsync -a --delete "_external/$REPO/$SRC/" "$DEST/"
-      #       elif [ -f "_external/$REPO/$SRC" ]; then
-      #         mkdir -p "$DEST"
-      #         rsync -a "_external/$REPO/$SRC" "$DEST/"
-      #       else
-      #         echo "WARN: '$SRC' not found in $REPO"
-      #       fi
-      #     done
+      - name: Aggregate docs from other repos (optional)
+        if: ${{ inputs.aggregate_docs != '' }}
+        env:
+          AGG: ${{ inputs.aggregate_docs }}
+          ORG: ${{ github.repository_owner }}
+          # Export both so gh/git can auth either way
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p docs/projects _external
+          IFS=',' read -ra ITEMS <<< "$AGG"
+          for item in "${ITEMS[@]}"; do
+            # item format: repo:path_in_repo:dest_subdir
+            REPO="${item%%:*}"
+            REST="${item#*:}"
+            SRC="${REST%%:*}"
+            DEST_SUB="${REST#*:}"
 
-      - name: Build MkDocs
+            DEST="docs/projects/${DEST_SUB}"
+            echo "::group::Clone and copy: $REPO | $SRC -> $DEST"
+            mkdir -p "_external/$REPO" "$DEST"
+
+            # Clone lightweight
+            gh repo clone "$ORG/$REPO" "_external/$REPO" -- --depth 1
+
+            if [ -d "_external/$REPO/$SRC" ]; then
+              rsync -a --delete "_external/$REPO/$SRC/" "$DEST/"
+            elif [ -f "_external/$REPO/$SRC" ]; then
+              rsync -a "_external/$REPO/$SRC" "$DEST/"
+            else
+              echo "WARN: path '$SRC' not found in $REPO" >&2
+            fi
+
+            echo "Resulting files in $DEST:"
+            ls -la "$DEST" || true
+            echo "::endgroup::"
+          done
+
+      - name: Show docs tree (debug)
+        run: |
+          echo "::group::docs/"
+          ls -laR docs | sed -n '1,200p'
+          echo "::endgroup::"
+
+      - name: Build MkDocs (strict)
         run: uv run mkdocs build --strict
+
+      - name: List site (debug)
+        run: |
+          echo "::group::site/"
+          ls -la site | sed -n '1,200p'
+          echo "::endgroup::"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
