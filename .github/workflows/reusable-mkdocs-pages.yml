@@ -14,7 +14,6 @@ on:
         type: string
         default: ""
     secrets:
-      # Optional PAT with repo read; only needed if default GITHUB_TOKEN can't read source repos
       GH_TOKEN:
         required: false
 
@@ -46,7 +45,6 @@ jobs:
         env:
           AGG: ${{ inputs.aggregate_docs }}
           ORG: ${{ github.repository_owner }}
-          # Export both so gh/git can auth either way
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -54,10 +52,9 @@ jobs:
           mkdir -p docs/projects _external
           IFS=',' read -ra ITEMS <<< "$AGG"
           for item in "${ITEMS[@]}"; do
-            # Trim surrounding whitespace on the whole item
-            item="$(echo "$item" | xargs)"
+            item="$(echo "$item" | xargs)"  # trim
 
-            # Split and trim each field: repo : src : dest_sub
+            # repo : src : dest_sub
             REPO_RAW="${item%%:*}"; REST="${item#*:}"
             SRC_RAW="${REST%%:*}";  DEST_SUB_RAW="${REST#*:}"
             REPO="$(echo "$REPO_RAW" | xargs)"
@@ -68,18 +65,15 @@ jobs:
             echo "::group::Clone and copy: $REPO | $SRC -> $DEST_DIR"
             mkdir -p "_external/$REPO" "$DEST_DIR"
 
-            # Clone once
             if [ ! -d "_external/$REPO/.git" ]; then
               gh repo clone "$ORG/$REPO" "_external/$REPO" -- --depth 1
             fi
 
             if [ -d "_external/$REPO/$SRC" ]; then
-              # If SRC is a directory -> mirror into DEST_DIR/
               rsync -a --delete "_external/$REPO/$SRC/" "$DEST_DIR/"
             elif [ -f "_external/$REPO/$SRC" ]; then
-              # If SRC is a single file -> copy into DEST_DIR/
               cp "_external/$REPO/$SRC" "$DEST_DIR/"
-              # README -> index for section landing pages
+              # README -> index for landing pages
               if [ "$(basename "$SRC")" = "README.md" ] && [ ! -f "$DEST_DIR/index.md" ]; then
                 mv "$DEST_DIR/README.md" "$DEST_DIR/index.md"
               fi
@@ -89,6 +83,23 @@ jobs:
 
             echo "Resulting files in $DEST_DIR:"
             ls -la "$DEST_DIR" || true
+            echo "::endgroup::"
+          done
+
+      - name: Normalize links inside aggregated docs folders
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # For each aggregated /docs subtree, fix common link patterns
+          for DOCS_DIR in docs/projects/*/docs; do
+            echo "::group::Rewriting links in $DOCS_DIR"
+            # 1) Strip leading 'docs/' in markdown links when already under /docs
+            #    e.g., (docs/ohlcv_manager.md) -> (ohlcv_manager.md)
+            find "$DOCS_DIR" -type f -name '*.md' -print0 | xargs -0 perl -0777 -pe 's/\((\s*)docs\//\(\1/g' -i
+
+            # 2) Rewrite links to frontend/backend READMEs to point to section roots
+            #    (frontend/README.md) -> (../frontend/) ; (backend/README.md) -> (../backend/)
+            find "$DOCS_DIR" -type f -name '*.md' -print0 | xargs -0 perl -0777 -pe 's/\((\s*)frontend\/README\.md\)/(\1..\/frontend\/)/g; s/\((\s*)backend\/README\.md\)/(\1..\/backend\/)/g' -i
             echo "::endgroup::"
           done
 
