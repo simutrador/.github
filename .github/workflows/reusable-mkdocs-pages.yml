@@ -14,7 +14,7 @@ on:
         type: string
         default: ""
     secrets:
-      # Optional org/user PAT with repo read, only needed if GITHUB_TOKEN can't read source repos
+      # Optional PAT with repo read; only needed if default GITHUB_TOKEN can't read source repos
       GH_TOKEN:
         required: false
 
@@ -46,6 +46,7 @@ jobs:
         env:
           AGG: ${{ inputs.aggregate_docs }}
           ORG: ${{ github.repository_owner }}
+          # Export both so gh/git can auth either way
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -73,10 +74,12 @@ jobs:
             fi
 
             if [ -d "_external/$REPO/$SRC" ]; then
+              # If SRC is a directory -> mirror into DEST_DIR/
               rsync -a --delete "_external/$REPO/$SRC/" "$DEST_DIR/"
             elif [ -f "_external/$REPO/$SRC" ]; then
+              # If SRC is a single file -> copy into DEST_DIR/
               cp "_external/$REPO/$SRC" "$DEST_DIR/"
-              # README -> index
+              # README -> index for section landing pages
               if [ "$(basename "$SRC")" = "README.md" ] && [ ! -f "$DEST_DIR/index.md" ]; then
                 mv "$DEST_DIR/README.md" "$DEST_DIR/index.md"
               fi
@@ -89,25 +92,25 @@ jobs:
             echo "::endgroup::"
           done
 
-            - name: Show docs tree (debug)
-              run: |
-                echo "::group::docs/"
-                ls -laR docs | sed -n '1,200p'
-                echo "::endgroup::"
+      - name: Show docs tree (debug)
+        run: |
+          echo "::group::docs/"
+          ls -laR docs | sed -n '1,200p'
+          echo "::endgroup::"
 
-            - name: Build MkDocs (strict)
-              run: uv run mkdocs build --strict
+      - name: Build MkDocs (strict)
+        run: uv run mkdocs build --strict
 
-            - name: List site (debug)
-              run: |
-                echo "::group::site/"
-                ls -la site | sed -n '1,200p'
-                echo "::endgroup::"
+      - name: List site (debug)
+        run: |
+          echo "::group::site/"
+          ls -la site | sed -n '1,200p'
+          echo "::endgroup::"
 
-            - name: Upload Pages artifact
-              uses: actions/upload-pages-artifact@v3
-              with:
-                path: ${{ inputs.publish_dir }}
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ inputs.publish_dir }}
 
   deploy:
     needs: build
