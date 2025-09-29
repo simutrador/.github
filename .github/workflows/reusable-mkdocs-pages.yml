@@ -53,31 +53,31 @@ jobs:
           mkdir -p docs/projects _external
           IFS=',' read -ra ITEMS <<< "$AGG"
           for item in "${ITEMS[@]}"; do
-            # item format: repo:path_in_repo:dest_under_docs/projects
-            REPO="${item%%:*}"
-            REST="${item#*:}"
-            SRC="${REST%%:*}"
-            DEST_SUB="${REST#*:}"
+            # Trim surrounding whitespace on the whole item
+            item="$(echo "$item" | xargs)"
 
-            SRC_BASENAME="$(basename "$SRC")"
+            # Split and trim each field: repo : src : dest_sub
+            REPO_RAW="${item%%:*}"; REST="${item#*:}"
+            SRC_RAW="${REST%%:*}";  DEST_SUB_RAW="${REST#*:}"
+            REPO="$(echo "$REPO_RAW" | xargs)"
+            SRC="$(echo "$SRC_RAW" | xargs)"
+            DEST_SUB="$(echo "$DEST_SUB_RAW" | xargs)"
+
             DEST_DIR="docs/projects/${DEST_SUB}"
-
             echo "::group::Clone and copy: $REPO | $SRC -> $DEST_DIR"
             mkdir -p "_external/$REPO" "$DEST_DIR"
 
-            # Clone lightweight
+            # Clone once
             if [ ! -d "_external/$REPO/.git" ]; then
               gh repo clone "$ORG/$REPO" "_external/$REPO" -- --depth 1
             fi
 
             if [ -d "_external/$REPO/$SRC" ]; then
-              # SRC is a directory -> mirror into DEST_DIR/
               rsync -a --delete "_external/$REPO/$SRC/" "$DEST_DIR/"
             elif [ -f "_external/$REPO/$SRC" ]; then
-              # SRC is a single file -> copy into DEST_DIR/
               cp "_external/$REPO/$SRC" "$DEST_DIR/"
-              # If we just copied a README.md and there's no index.md yet, rename to index.md
-              if [ "$SRC_BASENAME" = "README.md" ] && [ ! -f "$DEST_DIR/index.md" ]; then
+              # README -> index
+              if [ "$(basename "$SRC")" = "README.md" ] && [ ! -f "$DEST_DIR/index.md" ]; then
                 mv "$DEST_DIR/README.md" "$DEST_DIR/index.md"
               fi
             else
@@ -89,25 +89,25 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Show docs tree (debug)
-        run: |
-          echo "::group::docs/"
-          ls -laR docs | sed -n '1,200p'
-          echo "::endgroup::"
+            - name: Show docs tree (debug)
+              run: |
+                echo "::group::docs/"
+                ls -laR docs | sed -n '1,200p'
+                echo "::endgroup::"
 
-      - name: Build MkDocs (strict)
-        run: uv run mkdocs build --strict
+            - name: Build MkDocs (strict)
+              run: uv run mkdocs build --strict
 
-      - name: List site (debug)
-        run: |
-          echo "::group::site/"
-          ls -la site | sed -n '1,200p'
-          echo "::endgroup::"
+            - name: List site (debug)
+              run: |
+                echo "::group::site/"
+                ls -la site | sed -n '1,200p'
+                echo "::endgroup::"
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ${{ inputs.publish_dir }}
+            - name: Upload Pages artifact
+              uses: actions/upload-pages-artifact@v3
+              with:
+                path: ${{ inputs.publish_dir }}
 
   deploy:
     needs: build
