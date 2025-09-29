@@ -9,11 +9,13 @@ on:
       publish_dir:
         type: string
         default: "site"
-      # CSV: repo:path_in_repo:dest_subdir (e.g. "simutrador-data-manager:docs:data-manager")
+      # CSV items: repo:path_in_repo:dest_subdir
+      # example: "simutrador-data-manager:docs:data-manager"
       aggregate_docs:
         type: string
         default: ""
     secrets:
+      # Optional PAT with repo read; only needed if GITHUB_TOKEN can't read source repos
       GH_TOKEN:
         required: false
 
@@ -52,9 +54,9 @@ jobs:
           mkdir -p docs/projects _external
           IFS=',' read -ra ITEMS <<< "$AGG"
           for item in "${ITEMS[@]}"; do
-            item="$(echo "$item" | xargs)"  # trim
+            item="$(echo "$item" | xargs)"  # trim spaces
 
-            # repo : src : dest_sub
+            # Split: repo : src : dest_sub
             REPO_RAW="${item%%:*}"; REST="${item#*:}"
             SRC_RAW="${REST%%:*}";  DEST_SUB_RAW="${REST#*:}"
             REPO="$(echo "$REPO_RAW" | xargs)"
@@ -65,15 +67,18 @@ jobs:
             echo "::group::Clone and copy: $REPO | $SRC -> $DEST_DIR"
             mkdir -p "_external/$REPO" "$DEST_DIR"
 
+            # Clone once
             if [ ! -d "_external/$REPO/.git" ]; then
               gh repo clone "$ORG/$REPO" "_external/$REPO" -- --depth 1
             fi
 
             if [ -d "_external/$REPO/$SRC" ]; then
+              # Directory -> mirror into DEST_DIR/
               rsync -a --delete "_external/$REPO/$SRC/" "$DEST_DIR/"
             elif [ -f "_external/$REPO/$SRC" ]; then
+              # Single file -> copy into DEST_DIR/
               cp "_external/$REPO/$SRC" "$DEST_DIR/"
-              # README -> index for landing pages
+              # README -> index for section landing pages
               if [ "$(basename "$SRC")" = "README.md" ] && [ ! -f "$DEST_DIR/index.md" ]; then
                 mv "$DEST_DIR/README.md" "$DEST_DIR/index.md"
               fi
@@ -86,11 +91,11 @@ jobs:
             echo "::endgroup::"
           done
 
-            - name: Normalize aggregated content (README → index)
+      - name: Normalize aggregated content (README → index)
         run: |
           set -euo pipefail
           shopt -s nullglob
-          # Make directories linkable: any README.md becomes index.md if index doesn't exist
+          # Any README.md becomes index.md if index doesn't exist (makes dir links work)
           while IFS= read -r -d '' f; do
             d="$(dirname "$f")"
             if [ ! -f "$d/index.md" ]; then
@@ -105,7 +110,7 @@ jobs:
           shopt -s nullglob
           # For each .../docs subtree:
           for DOCS_DIR in docs/projects/*/docs; do
-            # 1) Strip leading 'docs/' in links when you're already under /docs
+            # 1) Strip leading 'docs/' in links when already under /docs
             find "$DOCS_DIR" -type f -name '*.md' -print0 \
               | xargs -0 perl -0777 -pe 's/\((\s*)docs\//\(\1/g' -i
             # 2) Point to section roots: ../frontend/ -> ../frontend/index.md, ../backend/ -> ../backend/index.md
@@ -116,34 +121,15 @@ jobs:
       - name: Fix cross-section links in section homepages (root-level)
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          # Your root section page is projects/data-manager/index.md.
-          # Rewrite frontend/README.md -> frontend/index.md and backend/README.md -> backend/index.md
+          # Your root section page for Data Manager
           if [ -f docs/projects/data-manager/index.md ]; then
             perl -0777 -pe 's/\((\s*)frontend\/README\.md\)/(\1frontend\/index.md)/g; s/\((\s*)backend\/README\.md\)/(\1backend\/index.md)/g' -i docs/projects/data-manager/index.md
           fi
-          # If the backend README links to documentation/main.md but only index.md exists, rewrite it.
+          # If backend docs link to documentation/main.md but only index.md exists, rewrite it.
           if [ -f docs/projects/data-manager/backend/documentation/index.md ] && [ ! -f docs/projects/data-manager/backend/documentation/main.md ]; then
             find docs/projects/data-manager/backend -type f -name '*.md' -print0 \
               | xargs -0 perl -0777 -pe 's/\((\s*)documentation\/main\.md\)/(\1documentation\/index.md)/g' -i
           fi
-
-      - name: Normalize links inside aggregated docs folders
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          # For each aggregated /docs subtree, fix common link patterns
-          for DOCS_DIR in docs/projects/*/docs; do
-            echo "::group::Rewriting links in $DOCS_DIR"
-            # 1) Strip leading 'docs/' in markdown links when already under /docs
-            #    e.g., (docs/ohlcv_manager.md) -> (ohlcv_manager.md)
-            find "$DOCS_DIR" -type f -name '*.md' -print0 | xargs -0 perl -0777 -pe 's/\((\s*)docs\//\(\1/g' -i
-
-            # 2) Rewrite links to frontend/backend READMEs to point to section roots
-            #    (frontend/README.md) -> (../frontend/) ; (backend/README.md) -> (../backend/)
-            find "$DOCS_DIR" -type f -name '*.md' -print0 | xargs -0 perl -0777 -pe 's/\((\s*)frontend\/README\.md\)/(\1..\/frontend\/)/g; s/\((\s*)backend\/README\.md\)/(\1..\/backend\/)/g' -i
-            echo "::endgroup::"
-          done
 
       - name: Show docs tree (debug)
         run: |
