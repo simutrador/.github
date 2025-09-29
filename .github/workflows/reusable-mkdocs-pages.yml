@@ -86,6 +86,48 @@ jobs:
             echo "::endgroup::"
           done
 
+            - name: Normalize aggregated content (README → index)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # Make directories linkable: any README.md becomes index.md if index doesn't exist
+          while IFS= read -r -d '' f; do
+            d="$(dirname "$f")"
+            if [ ! -f "$d/index.md" ]; then
+              mv "$f" "$d/index.md"
+              echo "Renamed: $f -> $d/index.md"
+            fi
+          done < <(find docs/projects -type f -name 'README.md' -print0)
+
+      - name: Fix links inside aggregated /docs subtrees
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # For each .../docs subtree:
+          for DOCS_DIR in docs/projects/*/docs; do
+            # 1) Strip leading 'docs/' in links when you're already under /docs
+            find "$DOCS_DIR" -type f -name '*.md' -print0 \
+              | xargs -0 perl -0777 -pe 's/\((\s*)docs\//\(\1/g' -i
+            # 2) Point to section roots: ../frontend/ -> ../frontend/index.md, ../backend/ -> ../backend/index.md
+            find "$DOCS_DIR" -type f -name '*.md' -print0 \
+              | xargs -0 perl -0777 -pe 's/\((\s*)\.\.\/frontend\/\)/(\1..\/frontend\/index.md)/g; s/\((\s*)\.\.\/backend\/\)/(\1..\/backend\/index.md)/g' -i
+          done
+
+      - name: Fix cross-section links in section homepages (root-level)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # Your root section page is projects/data-manager/index.md.
+          # Rewrite frontend/README.md -> frontend/index.md and backend/README.md -> backend/index.md
+          if [ -f docs/projects/data-manager/index.md ]; then
+            perl -0777 -pe 's/\((\s*)frontend\/README\.md\)/(\1frontend\/index.md)/g; s/\((\s*)backend\/README\.md\)/(\1backend\/index.md)/g' -i docs/projects/data-manager/index.md
+          fi
+          # If the backend README links to documentation/main.md but only index.md exists, rewrite it.
+          if [ -f docs/projects/data-manager/backend/documentation/index.md ] && [ ! -f docs/projects/data-manager/backend/documentation/main.md ]; then
+            find docs/projects/data-manager/backend -type f -name '*.md' -print0 \
+              | xargs -0 perl -0777 -pe 's/\((\s*)documentation\/main\.md\)/(\1documentation\/index.md)/g' -i
+          fi
+
       - name: Normalize links inside aggregated docs folders
         run: |
           set -euo pipefail
