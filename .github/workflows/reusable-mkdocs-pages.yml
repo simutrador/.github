@@ -9,8 +9,8 @@ on:
       publish_dir:
         type: string
         default: "site"
-      # CSV items: repo:path_in_repo:dest_subdir
-      # example: "simutrador-data-manager:docs:data-manager"
+      # CSV items: repo:path_in_repo:dest_under_docs
+      # example: "simutrador-data-manager:docs:data-manager/docs"
       aggregate_docs:
         type: string
         default: ""
@@ -51,19 +51,19 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p docs/projects _external
+          mkdir -p docs _external
           IFS=',' read -ra ITEMS <<< "$AGG"
           for item in "${ITEMS[@]}"; do
             item="$(echo "$item" | xargs)"  # trim spaces
 
-            # Split: repo : src : dest_sub
+            # Split: repo : src : dest_under_docs
             REPO_RAW="${item%%:*}"; REST="${item#*:}"
             SRC_RAW="${REST%%:*}";  DEST_SUB_RAW="${REST#*:}"
             REPO="$(echo "$REPO_RAW" | xargs)"
             SRC="$(echo "$SRC_RAW" | xargs)"
             DEST_SUB="$(echo "$DEST_SUB_RAW" | xargs)"
 
-            DEST_DIR="docs/projects/${DEST_SUB}"
+            DEST_DIR="docs/${DEST_SUB}"
             echo "::group::Clone and copy: $REPO | $SRC -> $DEST_DIR"
             mkdir -p "_external/$REPO" "$DEST_DIR"
 
@@ -91,50 +91,44 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Normalize aggregated content (README → index)
+      # --- Normalization passes so MkDocs --strict finds targets ---
+
+      - name: Make directories linkable (README → index.md everywhere)
         run: |
           set -euo pipefail
           shopt -s nullglob
-          # Any README.md becomes index.md if index doesn't exist (makes dir links work)
           while IFS= read -r -d '' f; do
             d="$(dirname "$f")"
             if [ ! -f "$d/index.md" ]; then
               mv "$f" "$d/index.md"
               echo "Renamed: $f -> $d/index.md"
             fi
-          done < <(find docs/projects -type f -name 'README.md' -print0)
+          done < <(find docs -type f -name 'README.md' -print0)
+
+      - name: Rewrite common link patterns
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # 1) Any .../README.md links -> .../index.md (generic)
+          find docs -type f -name '*.md' -print0 \
+            | xargs -0 perl -0777 -pe 's/\((\s*)([^)]+?)README\.md\)/(\1\2index.md)/g' -i
 
       - name: Fix links inside aggregated /docs subtrees
         run: |
           set -euo pipefail
           shopt -s nullglob
-          # For each .../docs subtree:
-          for DOCS_DIR in docs/projects/*/docs; do
+          # For each top-level section that has its own docs/ subtree (e.g., docs/data-manager/docs)
+          for DOCS_DIR in docs/*/docs; do
+            [ -d "$DOCS_DIR" ] || continue
             # 1) Strip leading 'docs/' in links when already under /docs
             find "$DOCS_DIR" -type f -name '*.md' -print0 \
               | xargs -0 perl -0777 -pe 's/\((\s*)docs\//\(\1/g' -i
-            # 2) Point to section roots: ../frontend/ -> ../frontend/index.md, ../backend/ -> ../backend/index.md
-            find "$DOCS_DIR" -type f -name '*.md' -print0 \
-              | xargs -0 perl -0777 -pe 's/\((\s*)\.\.\/frontend\/\)/(\1..\/frontend\/index.md)/g; s/\((\s*)\.\.\/backend\/\)/(\1..\/backend\/index.md)/g' -i
           done
-
-      - name: Fix cross-section links in section homepages (root-level)
-        run: |
-          set -euo pipefail
-          # Your root section page for Data Manager
-          if [ -f docs/projects/data-manager/index.md ]; then
-            perl -0777 -pe 's/\((\s*)frontend\/README\.md\)/(\1frontend\/index.md)/g; s/\((\s*)backend\/README\.md\)/(\1backend\/index.md)/g' -i docs/projects/data-manager/index.md
-          fi
-          # If backend docs link to documentation/main.md but only index.md exists, rewrite it.
-          if [ -f docs/projects/data-manager/backend/documentation/index.md ] && [ ! -f docs/projects/data-manager/backend/documentation/main.md ]; then
-            find docs/projects/data-manager/backend -type f -name '*.md' -print0 \
-              | xargs -0 perl -0777 -pe 's/\((\s*)documentation\/main\.md\)/(\1documentation\/index.md)/g' -i
-          fi
 
       - name: Show docs tree (debug)
         run: |
           echo "::group::docs/"
-          ls -laR docs | sed -n '1,200p'
+          ls -laR docs | sed -n '1,300p'
           echo "::endgroup::"
 
       - name: Build MkDocs (strict)
