@@ -19,6 +19,9 @@ on:
       GH_TOKEN:
         required: false
 
+      PROJECT_TOKEN:
+        required: false
+
 permissions:
   contents: read
   pages: write
@@ -48,9 +51,18 @@ jobs:
           AGG: ${{ inputs.aggregate_docs }}
           ORG: ${{ github.repository_owner }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Select auth token precedence: GH_TOKEN > PROJECT_TOKEN > GITHUB_TOKEN
+          if [ -n "${GH_TOKEN:-}" ]; then
+            export GH_TOKEN="$GH_TOKEN"; export GITHUB_TOKEN="$GH_TOKEN"
+          elif [ -n "${PROJECT_TOKEN:-}" ]; then
+            export GH_TOKEN="$PROJECT_TOKEN"; export GITHUB_TOKEN="$PROJECT_TOKEN"
+          else
+            : # use provided GITHUB_TOKEN
+          fi
           mkdir -p docs _external
           IFS=',' read -ra ITEMS <<< "$AGG"
           for item in "${ITEMS[@]}"; do
