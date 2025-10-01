@@ -99,7 +99,11 @@ jobs:
           shopt -s nullglob
           while IFS= read -r -d '' f; do
             d="$(dirname "$f")"
-            if [ ! -f "$d/index.md" ]; then
+            if [ -f "$d/index.md" ]; then
+              # index.md already exists; remove duplicate README.md to avoid conflicts
+              rm -f "$f"
+              echo "Removed duplicate: $f (index.md already present)"
+            else
               mv "$f" "$d/index.md"
               echo "Renamed: $f -> $d/index.md"
             fi
