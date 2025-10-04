@@ -1,3 +1,4 @@
+# .github/workflows/reusable-mkdocs-pages.yml
 name: Reusable • Build & Deploy MkDocs to Pages
 
 on:
@@ -10,18 +11,19 @@ on:
         type: string
         default: "site"
       # CSV items: repo:path_in_repo:dest_under_docs
-      # example: "simutrador-data-manager:docs:data-manager/docs"
+      # example: "simutrador-data-manager:docs:data-manager/docs,simutrador-core:README.md:core"
       aggregate_docs:
         type: string
         default: ""
     secrets:
-      # Optional PAT with repo read; only needed if GITHUB_TOKEN can't read source repos
+      # Optional personal access tokens (fine-grained or classic).
+      # Caller must pass one explicitly or use `secrets: inherit`.
+      SIMU_TOKEN:
+        required: false
       GH_TOKEN:
         required: false
 
-      SIMU_TOKEN:
-        required: false
-
+# GITHUB_TOKEN perms kept minimal; PAT will be used for cross-repo reads
 permissions:
   contents: read
   pages: write
@@ -33,6 +35,7 @@ jobs:
     steps:
       - name: Checkout caller repo
         uses: actions/checkout@v4
+        # uses the caller job's GITHUB_TOKEN, which is fine for the caller repo
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -49,62 +52,78 @@ jobs:
         if: ${{ inputs.aggregate_docs != '' }}
         env:
           AGG: ${{ inputs.aggregate_docs }}
-          SIMU_TOKEN: ${{ secrets.SIMU_TOKEN }}
           ORG: ${{ github.repository_owner }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          GITHUB_TOKEN: ${{ github.token }}
+          # pass through secrets (may be empty)
+          SIMU_TOKEN: ${{ secrets.SIMU_TOKEN }}
+          GH_TOKEN_IN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN_IN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Select auth token precedence: GH_TOKEN > SIMU_TOKEN > GITHUB_TOKEN
-          if [ -n "${GH_TOKEN:-}" ]; then
-            export GH_TOKEN="$GH_TOKEN"; export GITHUB_TOKEN="$GH_TOKEN"; SEL_TOKEN="GH_TOKEN"
-          elif [ -n "${SIMU_TOKEN:-}" ]; then
-            export GH_TOKEN="$SIMU_TOKEN"; export GITHUB_TOKEN="$SIMU_TOKEN"; SEL_TOKEN="SIMU_TOKEN"
+
+          # ------------------------------
+          # Select auth token (PAT > GH_TOKEN > job GITHUB_TOKEN)
+          # Force gh to use our selection by UNSETTING GITHUB_TOKEN when PAT present.
+          # ------------------------------
+          if [ -n "${SIMU_TOKEN:-}" ]; then
+            unset GITHUB_TOKEN
+            export GH_TOKEN="${SIMU_TOKEN}"
+            SEL_TOKEN="SIMU_TOKEN"
+          elif [ -n "${GH_TOKEN_IN:-}" ]; then
+            unset GITHUB_TOKEN
+            export GH_TOKEN="${GH_TOKEN_IN}"
+            SEL_TOKEN="GH_TOKEN"
           else
-            SEL_TOKEN="GITHUB_TOKEN" # use provided GITHUB_TOKEN
+            # final fallback to the job's default token
+            export GH_TOKEN="${GITHUB_TOKEN_IN:-}"
+            export GITHUB_TOKEN="${GITHUB_TOKEN_IN:-}"
+            SEL_TOKEN="GITHUB_TOKEN"
           fi
-          echo "Using auth via $SEL_TOKEN"
+          echo "Using auth via ${SEL_TOKEN}"
+
           mkdir -p docs _external
           IFS=',' read -ra ITEMS <<< "$AGG"
-          for item in "${ITEMS[@]}"; do
-            item="$(echo "$item" | xargs)"  # trim spaces
 
-            # Split: repo : src : dest_under_docs
-            REPO_RAW="${item%%:*}"; REST="${item#*:}"
-            SRC_RAW="${REST%%:*}";  DEST_SUB_RAW="${REST#*:}"
-            REPO="$(echo "$REPO_RAW" | xargs)"
-            SRC="$(echo "$SRC_RAW" | xargs)"
-            DEST_SUB="$(echo "$DEST_SUB_RAW" | xargs)"
+          for raw in "${ITEMS[@]}"; do
+            item="$(echo "$raw" | xargs)"  # trim
+            [ -z "$item" ] && continue
+
+            # Split "repo:path:dest"
+            REPO="${item%%:*}"; REST="${item#*:}"
+            SRC="${REST%%:*}";  DEST_SUB="${REST#*:}"
+
+            # Normalize FULL_REPO org/name
+            FULL_REPO="$REPO"
+            if [[ "$REPO" != */* ]]; then
+              FULL_REPO="$ORG/$REPO"
+            fi
 
             DEST_DIR="docs/${DEST_SUB}"
-            echo "::group::Clone and copy: $REPO | $SRC -> $DEST_DIR"
+            echo "::group::Clone and copy: $FULL_REPO | $SRC -> $DEST_DIR"
             mkdir -p "_external/$REPO" "$DEST_DIR"
 
-            # Clone once
+            # Clone once (prefer gh; fallback to git with header auth using GH_TOKEN)
             if [ ! -d "_external/$REPO/.git" ]; then
-              FULL_REPO="$REPO"
-              if [[ "$REPO" != */* ]]; then
-                FULL_REPO="$ORG/$REPO"
-              fi
-              if ! gh repo clone "$FULL_REPO" "_external/$REPO" -- --depth 1; then
-                echo "gh repo clone failed; falling back to git clone with HTTP auth header"
-                echo "Using HTTP header auth"
-                git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/${FULL_REPO}.git" "_external/$REPO"
+              if command -v gh >/dev/null 2>&1; then
+                if ! GH_TOKEN="$GH_TOKEN" gh repo clone "$FULL_REPO" "_external/$REPO" -- --depth 1; then
+                  echo "gh clone failed; falling back to git with header auth"
+                  git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${FULL_REPO}.git" "_external/$REPO"
+                fi
+              else
+                echo "gh not found; using git with header auth"
+                git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${FULL_REPO}.git" "_external/$REPO"
               fi
             fi
 
             if [ -d "_external/$REPO/$SRC" ]; then
-              # Directory -> mirror into DEST_DIR/
               rsync -a --delete "_external/$REPO/$SRC/" "$DEST_DIR/"
             elif [ -f "_external/$REPO/$SRC" ]; then
-              # Single file -> copy into DEST_DIR/
+              mkdir -p "$DEST_DIR"
               cp "_external/$REPO/$SRC" "$DEST_DIR/"
-              # README -> index for section landing pages
               if [ "$(basename "$SRC")" = "README.md" ] && [ ! -f "$DEST_DIR/index.md" ]; then
                 mv "$DEST_DIR/README.md" "$DEST_DIR/index.md"
               fi
             else
-              echo "WARN: path '$SRC' not found in $REPO" >&2
+              echo "WARN: path '$SRC' not found in $FULL_REPO" >&2
             fi
 
             echo "Resulting files in $DEST_DIR:"
@@ -121,7 +140,6 @@ jobs:
           while IFS= read -r -d '' f; do
             d="$(dirname "$f")"
             if [ -f "$d/index.md" ]; then
-              # index.md already exists; remove duplicate README.md to avoid conflicts
               rm -f "$f"
               echo "Removed duplicate: $f (index.md already present)"
             else
@@ -133,19 +151,14 @@ jobs:
       - name: Rewrite common link patterns
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          # 1) Any .../README.md links -> .../index.md (generic)
           find docs -type f -name '*.md' -print0 \
             | xargs -0 perl -0777 -pe 's/\((\s*)([^)]+?)README\.md\)/(\1\2index.md)/g' -i
 
       - name: Fix links inside aggregated /docs subtrees
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          # For each top-level section that has its own docs/ subtree (e.g., docs/data-manager/docs)
           for DOCS_DIR in docs/*/docs; do
             [ -d "$DOCS_DIR" ] || continue
-            # 1) Strip leading 'docs/' in links when already under /docs
             find "$DOCS_DIR" -type f -name '*.md' -print0 \
               | xargs -0 perl -0777 -pe 's/\((\s*)docs\//\(\1/g' -i
           done
@@ -162,7 +175,7 @@ jobs:
       - name: List site (debug)
         run: |
           echo "::group::site/"
-          ls -la site | sed -n '1,200p'
+          ls -la "${{ inputs.publish_dir }}" | sed -n '1,200p'
           echo "::endgroup::"
 
       - name: Upload Pages artifact
