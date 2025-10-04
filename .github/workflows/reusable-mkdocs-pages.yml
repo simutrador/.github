@@ -19,9 +19,6 @@ on:
       GH_TOKEN:
         required: false
 
-      PROJECT_TOKEN:
-        required: false
-
       SIMU_TOKEN:
         required: false
 
@@ -55,17 +52,14 @@ jobs:
           SIMU_TOKEN: ${{ secrets.SIMU_TOKEN }}
           ORG: ${{ github.repository_owner }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Select auth token precedence: GH_TOKEN > SIMU_TOKEN > PROJECT_TOKEN > GITHUB_TOKEN
+          # Select auth token precedence: GH_TOKEN > SIMU_TOKEN > GITHUB_TOKEN
           if [ -n "${GH_TOKEN:-}" ]; then
             export GH_TOKEN="$GH_TOKEN"; export GITHUB_TOKEN="$GH_TOKEN"; SEL_TOKEN="GH_TOKEN"
           elif [ -n "${SIMU_TOKEN:-}" ]; then
             export GH_TOKEN="$SIMU_TOKEN"; export GITHUB_TOKEN="$SIMU_TOKEN"; SEL_TOKEN="SIMU_TOKEN"
-          elif [ -n "${PROJECT_TOKEN:-}" ]; then
-            export GH_TOKEN="$PROJECT_TOKEN"; export GITHUB_TOKEN="$PROJECT_TOKEN"; SEL_TOKEN="PROJECT_TOKEN"
           else
             SEL_TOKEN="GITHUB_TOKEN" # use provided GITHUB_TOKEN
           fi
