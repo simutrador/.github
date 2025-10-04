@@ -22,6 +22,9 @@ on:
       PROJECT_TOKEN:
         required: false
 
+      SIMU_TOKEN:
+        required: false
+
 permissions:
   contents: read
   pages: write
@@ -49,15 +52,18 @@ jobs:
         if: ${{ inputs.aggregate_docs != '' }}
         env:
           AGG: ${{ inputs.aggregate_docs }}
+          SIMU_TOKEN: ${{ secrets.SIMU_TOKEN }}
           ORG: ${{ github.repository_owner }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Select auth token precedence: GH_TOKEN > PROJECT_TOKEN > GITHUB_TOKEN
+          # Select auth token precedence: GH_TOKEN > SIMU_TOKEN > PROJECT_TOKEN > GITHUB_TOKEN
           if [ -n "${GH_TOKEN:-}" ]; then
             export GH_TOKEN="$GH_TOKEN"; export GITHUB_TOKEN="$GH_TOKEN"
+          elif [ -n "${SIMU_TOKEN:-}" ]; then
+            export GH_TOKEN="$SIMU_TOKEN"; export GITHUB_TOKEN="$SIMU_TOKEN"
           elif [ -n "${PROJECT_TOKEN:-}" ]; then
             export GH_TOKEN="$PROJECT_TOKEN"; export GITHUB_TOKEN="$PROJECT_TOKEN"
           else
@@ -81,7 +87,15 @@ jobs:
 
             # Clone once
             if [ ! -d "_external/$REPO/.git" ]; then
-              gh repo clone "$ORG/$REPO" "_external/$REPO" -- --depth 1
+              FULL_REPO="$REPO"
+              if [[ "$REPO" != */* ]]; then
+                FULL_REPO="$ORG/$REPO"
+              fi
+              if ! gh repo clone "$FULL_REPO" "_external/$REPO" -- --depth 1; then
+                echo "gh repo clone failed; falling back to git clone with HTTP auth header"
+                echo "Using HTTP header auth"
+                git -c http.extraHeader="Authorization: bearer $GITHUB_TOKEN" clone --depth 1 "https://github.com/$FULL_REPO.git" "_external/$REPO"
+              fi
             fi
 
             if [ -d "_external/$REPO/$SRC" ]; then
